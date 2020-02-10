@@ -9,19 +9,7 @@ import os
 import pickle
 import sys
 
-from rt import Rt
 from freshdesk.api import API
-
-
-class Tag(Resource):
-
-    path_attribute = "tags"
-
-    def add(self, obj, id, item):
-        response = self._connection.session.get(
-            self.url + "/add?object=%s&o_id=%d&item=%s" % (obj, id, item)
-        )
-        return self._raise_or_return_json(response)
 
 
 TEMPLATE = """{
@@ -53,57 +41,17 @@ with open("rt2freshdesk.json") as handle:
 
 target = API(config["freshdesk_host"], config["freshdesk_key"])
 
-source = Rt(config["rt_url"], config["rt_user"], config["rt_pass"])
-if not source.login():
-    print("Failed to login to RT!")
+if not os.path.exists("rt2freshdesk.cache"):
+    print("Missing RT data")
     sys.exit(2)
+# Load RT from cache
+with open("rt2freshdesk.cache", "rb") as handle:
+    data = pickle.load(handle)
+users = data["users"]
+queues = data["queues"]
+tickets = data["tickets"]
+attachments = data["attachments"]
 
-if os.path.exists("rt2freshdesk.cache"):
-    # Load RT from cache
-    with open("rt2freshdesk.cache", "rb") as handle:
-        data = pickle.load(handle)
-    users = data["users"]
-    queues = data["queues"]
-    tickets = data["tickets"]
-    attachments = data["attachments"]
-
-else:
-    # Load RT from remote
-    users = {}
-    attachments = {}
-    tickets = []
-    queues = set()
-
-    def ensure_user(username):
-        if username not in users:
-            users[username] = source.get_user(username)
-
-    for i in range(1, 1000):
-        print("Loading ticket {}".format(i))
-        ticket = source.get_ticket(i)
-        if ticket is None:
-            break
-        queues.add(ticket["Queue"])
-        ensure_user(ticket["Creator"])
-        ensure_user(ticket["Owner"])
-        history = source.get_history(i)
-        for item in history:
-            for a, title in item["Attachments"]:
-                attachments[a] = source.get_attachment(i, a)
-            ensure_user(item["Creator"])
-        tickets.append({"ticket": ticket, "history": history})
-    with open("rt2freshdesk.cache", "wb") as handle:
-        data = pickle.dump(
-            {
-                "users": users,
-                "queues": queues,
-                "tickets": tickets,
-                "attachments": attachments,
-            },
-            handle,
-        )
-
-sys.exit(0)
 STATUSMAP = {"new": 1, "open": 2, "resolved": 4, "rejected": 4, "deleted": 4}
 
 USERMAP = {}
