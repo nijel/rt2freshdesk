@@ -52,7 +52,10 @@ queues = data["queues"]
 tickets = data["tickets"]
 attachments = data["attachments"]
 
-STATUSMAP = {"new": 1, "open": 2, "resolved": 4, "rejected": 4, "deleted": 4}
+
+
+
+STATUSMAP = {"new": 2, "open": 2, "resolved": 4, "rejected": 5, "deleted": 5}
 
 USERMAP = {}
 
@@ -91,13 +94,10 @@ def get_user(userdata):
 for ticket in tickets:
     label = "RT-{}".format(ticket["ticket"]["id"].split("/")[1])
     print("Importing {}".format(label))
-    new = get_freshdesk(
-        on_behalf_of=get_user(users[ticket["ticket"]["Creator"]])
-    ).ticket.create(
-        {
-            "title": "{} [{}]".format(ticket["ticket"]["Subject"], label),
-            "group": "Users",
-            "state_id": STATUSMAP[ticket["ticket"]["Status"]],
+    new = target.tickets.create_ticket(
+        email=users[ticket["ticket"]["Creator"]]["EmailAddress"],
+        subject="{} [{}]".format(ticket["ticket"]["Subject"], label),
+        status=STATUSMAP[ticket["ticket"]["Status"]],
             "note": "RT-import:{}".format(ticket["ticket"]["id"]),
             "article": {
                 "subject": ticket["ticket"]["Subject"],
