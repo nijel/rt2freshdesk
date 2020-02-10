@@ -20,6 +20,14 @@ with open("rt2freshdesk.cache", "rb") as handle:
 with open("freshdesk-users.csv", "w") as handle:
     writer = DictWriter(handle, ["Name", "Email"])
     for user in users.values():
-        if user["Privileged"]:
+        if "EmailAddress" not in user:
+            print("Skipping user without email: {}".format(user))
+            continue
+        if user.get("Privileged"):
             print("Skipping privileged user {}".format(user["EmailAddress"]))
-        writer.writerow({"Name": user["RealName"], "Email": user["EmailAddress"]})
+            continue
+        email = user["EmailAddress"]
+        name = user.get("RealName", user.get("Name", ""))
+        if name == email:
+            name = ""
+        writer.writerow({"Name": name, "Email": email})
