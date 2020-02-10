@@ -3,43 +3,36 @@
 Quick and dirty attempt to migrate issues from Request Tracker to Freshdesk.
 """
 
-import base64
+import http.client
 import json
+import logging
 import os
 import pickle
 import sys
+from tempfile import TemporaryDirectory
 
 from freshdesk.api import API
 
+DEBUG = False
 
-TEMPLATE = """{
-"freshdesk_host": "",
-"freshdesk_key": "",
-"rt_url": "",
-"rt_user": "",
-"rt_pass": ""
-}
-"""
+if DEBUG:
+    # Logging for requests
+    http.client.HTTPConnection.debuglevel = 1
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.DEBUG)
+    requests_log = logging.getLogger("requests.packages.urllib3")
+    requests_log.setLevel(logging.DEBUG)
+    requests_log.propagate = True
+
 
 COMMENT_TEMPLATE = """
 Ticket imported from Request Tracker
 
 Created: {Created}
 Resolved: {Resolved}
+Status: {Status}
 """
 
-
-if not os.path.exists("rt2freshdesk.json"):
-    print("Missing rt2freshdesk.json!")
-    print("Create one based on following template:")
-    print(TEMPLATE)
-    sys.exit(1)
-
-with open("rt2freshdesk.json") as handle:
-    config = json.load(handle)
-
-
-target = API(config["freshdesk_host"], config["freshdesk_key"])
 
 if not os.path.exists("rt2freshdesk.cache"):
     print("Missing RT data")
@@ -52,88 +45,73 @@ queues = data["queues"]
 tickets = data["tickets"]
 attachments = data["attachments"]
 
+with open("rt2freshdesk.json") as handle:
+    config = json.load(handle)
 
 
+target = API(config["freshdesk_host"], config["freshdesk_key"], version=2)
 
-STATUSMAP = {"new": 2, "open": 2, "resolved": 4, "rejected": 5, "deleted": 5}
 
+STATUSMAP = {"new": 2, "open": 2, "resolved": 5, "rejected": 5, "deleted": 5}
+
+# Fetch user mappings
 USERMAP = {}
-
-for user in target.user.all():
-    USERMAP[user["email"].lower()] = user["login"]
-
-
-def get_user(userdata):
-    email = userdata["EmailAddress"]
-    lemail = email.lower()
-    # Search existing users
-    if lemail not in USERMAP:
-        for user in target.user.search({"query": email}):
-            USERMAP[user["email"].lower()] = user["login"]
-    # Create new one
-    if lemail not in USERMAP:
-        kwargs = {"email": email}
-        if "RealName" in userdata:
-            realname = userdata["RealName"]
-            if ", " in realname:
-                last, first = realname.split(", ", 1)
-            elif " " in realname:
-                first, last = realname.split(None, 1)
-            else:
-                last = realname
-                first = ""
-            kwargs["lastname"] = last
-            kwargs["firstname"] = first
-        user = target.user.create(kwargs)
-        USERMAP[user["email"].lower()] = user["login"]
-
-    return USERMAP[lemail]
+for contact in target.contacts.list_contacts():
+    USERMAP[contact.email] = contact.id
+for agent in target.agents.list_agents():
+    USERMAP[agent.contact["email"]] = agent.id
 
 
 # Create tickets
-for ticket in tickets:
-    label = "RT-{}".format(ticket["ticket"]["id"].split("/")[1])
-    print("Importing {}".format(label))
-    new = target.tickets.create_ticket(
-        email=users[ticket["ticket"]["Creator"]]["EmailAddress"],
-        subject="{} [{}]".format(ticket["ticket"]["Subject"], label),
-        status=STATUSMAP[ticket["ticket"]["Status"]],
-            "note": "RT-import:{}".format(ticket["ticket"]["id"]),
-            "article": {
-                "subject": ticket["ticket"]["Subject"],
-                "body": ticket["history"][0]["Content"],
-            },
-        }
-    )
-    tag_obj.add("Ticket", new["id"], ticket["ticket"]["Queue"].lower().split()[0])
-    ticket_article.create(
-        {
-            "ticket_id": new["id"],
-            "body": COMMENT_TEMPLATE.format(**ticket["ticket"]),
-            "internal": True,
-        }
-    )
-
-    for item in ticket["history"]:
-        if item["Type"] not in ("Correspond", "Comment"):
+with TemporaryDirectory(prefix="rt2freshdesk") as tempdir:
+    for ticket in tickets:
+        label = "RT-{}".format(ticket["ticket"]["id"].split("/")[1])
+        if label != "RT-993":
             continue
-        files = []
-        for a, title in item["Attachments"]:
-            data = attachments[a]
-            if data["Filename"] in ("", "signature.asc"):
-                continue
-            files.append(
-                {
-                    "filename": data["Filename"],
-                    "data": base64.b64encode(data["Content"]).decode("utf-8"),
-                    "mime-type": data["ContentType"],
-                }
-            )
-        TicketArticle(get_freshdesk(on_behalf_of=get_user(users[item["Creator"]]))).create(
-            {
-                "ticket_id": new["id"],
-                "body": item["Content"],
-                "internal": item["Type"] == "Comment",
-                "attachments": files,
-            }
+        print("Importing {}".format(label))
+
+        kwargs = {}
+        # Update owner (if set)
+        if ticket["ticket"]["Owner"] != "Nobody":
+            kwargs["responder_id"] = USERMAP[
+                users[ticket["ticket"]["Owner"]]["EmailAddress"]
+            ]
+
+        # Create new ticket
+        new_ticket = target.tickets.create_ticket(
+            email=users[ticket["ticket"]["Creator"]]["EmailAddress"],
+            subject="{} [{}]".format(ticket["ticket"]["Subject"], label),
+            type=ticket["ticket"]["Queue"],
+            description=ticket["history"][0]["Content"],
+            status=STATUSMAP[ticket["ticket"]["Status"]],
+            source=1,
+            **kwargs,
         )
+        # Add comment with metadata
+        target.comments.create_note(
+            new_ticket.id,
+            COMMENT_TEMPLATE.format(**ticket["ticket"]),
+            private=True,
+            user_id=USERMAP[config["fallback_user"]],
+        )
+
+        for item in ticket["history"]:
+            if item["Type"] not in ("Correspond", "Comment"):
+                continue
+            files = []
+            for a, title in item["Attachments"]:
+                data = attachments[a]
+                if data["Filename"] in ("", "signature.asc"):
+                    continue
+                filename = os.path.join(tempdir.name, data["Filename"])
+                with open(filename, "wb") as handle:
+                    handle.write(data["Content"])
+                files.append(filename)
+
+            target.comments.create_note(
+                new_ticket.id,
+                item["Content"],
+                private=item["Type"] == "Comment",
+                user_id=USERMAP[users[item["Creator"]]["EmailAddress"]],
+                attachments=files,
+            )

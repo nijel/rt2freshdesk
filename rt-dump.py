@@ -13,6 +13,7 @@ from rt import Rt
 TEMPLATE = """{
 "freshdesk_host": "",
 "freshdesk_key": "",
+"fallback_user": "",
 "rt_url": "",
 "rt_user": "",
 "rt_pass": ""
