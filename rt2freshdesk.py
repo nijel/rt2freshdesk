@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Quick and dirty attempt to migrate issues from Request Tracker to Zammad.
+Quick and dirty attempt to migrate issues from Request Tracker to Freshdesk.
 """
 
 import base64
