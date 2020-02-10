@@ -10,8 +10,7 @@ import pickle
 import sys
 
 from rt import Rt
-from zammad_py import ZammadAPI
-from zammad_py.api import Resource, TagList, TicketArticle
+from freshdesk.api import API
 
 
 class Tag(Resource):
@@ -26,10 +25,8 @@ class Tag(Resource):
 
 
 TEMPLATE = """{
-"zammad_host": "",
-"zammad_user": "",
-"zammad_password": "",
-"zammad_secure": true,
+"freshdesk_host": "",
+"freshdesk_key": "",
 "rt_url": "",
 "rt_user": "",
 "rt_pass": ""
@@ -44,37 +41,26 @@ Resolved: {Resolved}
 """
 
 
-if not os.path.exists("rt2zammad.json"):
-    print("Missing rt2zammad.json!")
+if not os.path.exists("rt2freshdesk.json"):
+    print("Missing rt2freshdesk.json!")
     print("Create one based on following template:")
     print(TEMPLATE)
     sys.exit(1)
 
-with open("rt2zammad.json") as handle:
+with open("rt2freshdesk.json") as handle:
     config = json.load(handle)
 
 
-def get_zammad(**kwargs):
-    return ZammadAPI(
-        host=config["zammad_host"],
-        username=config["zammad_user"],
-        password=config["zammad_password"],
-        is_secure=config["zammad_secure"],
-        **kwargs
-    )
-
-
-target = get_zammad()
-target.user.me()
+target = API(config["freshdesk_host"], config["freshdesk_key"])
 
 source = Rt(config["rt_url"], config["rt_user"], config["rt_pass"])
 if not source.login():
     print("Failed to login to RT!")
     sys.exit(2)
 
-if os.path.exists("rt2zammad.cache"):
+if os.path.exists("rt2freshdesk.cache"):
     # Load RT from cache
-    with open("rt2zammad.cache", "rb") as handle:
+    with open("rt2freshdesk.cache", "rb") as handle:
         data = pickle.load(handle)
     users = data["users"]
     queues = data["queues"]
@@ -106,7 +92,7 @@ else:
                 attachments[a] = source.get_attachment(i, a)
             ensure_user(item["Creator"])
         tickets.append({"ticket": ticket, "history": history})
-    with open("rt2zammad.cache", "wb") as handle:
+    with open("rt2freshdesk.cache", "wb") as handle:
         data = pickle.dump(
             {
                 "users": users,
@@ -117,16 +103,7 @@ else:
             handle,
         )
 
-# Create tags
-tag_list = TagList(target)
-ticket_article = TicketArticle(target)
-tag_obj = Tag(target)
-tags = {tag["name"] for tag in tag_list.all()}
-for queue in queues:
-    queue = queue.lower().split()[0]
-    if queue not in tags:
-        tag_list.create({"name": queue})
-
+sys.exit(0)
 STATUSMAP = {"new": 1, "open": 2, "resolved": 4, "rejected": 4, "deleted": 4}
 
 USERMAP = {}
@@ -166,7 +143,7 @@ def get_user(userdata):
 for ticket in tickets:
     label = "RT-{}".format(ticket["ticket"]["id"].split("/")[1])
     print("Importing {}".format(label))
-    new = get_zammad(
+    new = get_freshdesk(
         on_behalf_of=get_user(users[ticket["ticket"]["Creator"]])
     ).ticket.create(
         {
@@ -204,7 +181,7 @@ for ticket in tickets:
                     "mime-type": data["ContentType"],
                 }
             )
-        TicketArticle(get_zammad(on_behalf_of=get_user(users[item["Creator"]]))).create(
+        TicketArticle(get_freshdesk(on_behalf_of=get_user(users[item["Creator"]]))).create(
             {
                 "ticket_id": new["id"],
                 "body": item["Content"],

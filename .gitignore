@@ -104,6 +104,6 @@ venv.bak/
 .mypy_cache/
 
 # configuration
-rt2zammad.json
+rt2freshdesk.json
 # cache
-rt2zammad.cache
+rt2freshdesk.cache

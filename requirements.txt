@@ -1,2 +1,2 @@
 rt
-zammad_py
+python-freshdesk
