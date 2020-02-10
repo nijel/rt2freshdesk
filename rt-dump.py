@@ -47,7 +47,7 @@ def ensure_user(username):
         users[username] = source.get_user(username)
 
 
-for i in range(1, 1000):
+for i in range(1, 2000):
     print("Loading ticket {}".format(i))
     ticket = source.get_ticket(i)
     if ticket is None:
