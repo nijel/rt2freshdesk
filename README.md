@@ -10,3 +10,12 @@ Known issues:
 * Timestamps are not preserved. The Freshdesk API doesn't seem to allow this.
 * Freshdesk will send notification for all actions, you probably want to disable
   outgoing mail for time of import.
+* Type field on Freshdesk is used to map queues from RT, please define correct values manually.
+
+Usage:
+
+    # Dump Request Tracker data into local cache
+    rt-dump.py
+
+    # Dump users into CSV suitable for Freshdesk import
+    freshdesk-users.py
